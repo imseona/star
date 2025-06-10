@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>10해리 거리 확인 + 현재 위치 출항지 + 목적지 검색</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+  
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    #map { height: 90vh; }
+    #info {
+      padding: 10px;
+      font-size: 16px;
+      background: #f9f9f9;
+      border-top: 1px solid #ccc;
+    }
+    #report-btn {
+      display: none;
+      margin-top: 8px;
+      padding: 8px 12px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    #report-btn:hover {
+      background-color: #0056b3;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="info">현재 위치를 불러오는 중입니다...</div>
+<button id="report-btn">수상레저 원거리 신고하러 가기</button>
+
+<script>
+  const map = L.map('map');
+  const info = document.getElementById('info');
+  const reportBtn = document.getElementById('report-btn');
+
+  let startMarker = null;
+  let destMarker = null;
+  let routeLine = null;
+  let radiusCircle = null;
+
+  function calculateNauticalMiles(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const toRad = deg => deg * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+
+    const a = Math.sin(dLat/2)**2 +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+              Math.sin(dLon/2)**2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const km = R * c;
+    return km * 0.539957;
+  }
+
+  // 위성지도 타일
+  L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles © Esri &mdash; Source: Esri, i-cubed, USDA, etc.' }
+  ).addTo(map);
+
+  function setStartMarker(latlng) {
+    if (startMarker) {
+      startMarker.setLatLng(latlng);
+    } else {
+      startMarker = L.marker(latlng).addTo(map).bindPopup("출항지 (현재 위치)").openPopup();
+    }
+
+    if (radiusCircle) {
+      radiusCircle.setLatLng(latlng);
+    } else {
+      radiusCircle = L.circle(latlng, {
+        radius: 18520,
+        color: 'green',
+        fillOpacity: 0.1
+      }).addTo(map);
+    }
+  }
+
+  function setDestMarker(latlng) {
+    if (destMarker) {
+      destMarker.setLatLng(latlng);
+    } else {
+      destMarker = L.marker(latlng).addTo(map).bindPopup("목적지").openPopup();
+    }
+  }
+
+  function drawRoute(startLatLng, destLatLng) {
+    if (routeLine) {
+      routeLine.setLatLngs([startLatLng, destLatLng]);
+    } else {
+      routeLine = L.polyline([startLatLng, destLatLng], {color: 'blue'}).addTo(map);
+    }
+  }
+
+  function updateDistanceAndUI() {
+    if (!startMarker || !destMarker) {
+      info.textContent = "목적지를 지도에서 클릭하거나 검색하세요.";
+      reportBtn.style.display = 'none';
+      if(routeLine) {
+        map.removeLayer(routeLine);
+        routeLine = null;
+      }
+      return;
+    }
+    const start = startMarker.getLatLng();
+    const dest = destMarker.getLatLng();
+    const distanceNM = calculateNauticalMiles(start.lat, start.lng, dest.lat, dest.lng).toFixed(2);
+    drawRoute(start, dest);
+
+    if (distanceNM > 10) {
+      info.innerHTML = `⚠️ 거리: ${distanceNM} 해리 (10해리 초과) <br>수상레저 원거리 신고가 필요할 수 있습니다.`;
+      reportBtn.style.display = 'inline-block';
+    } else {
+      info.textContent = `거리: ${distanceNM} 해리 (10해리 이내)`;
+      reportBtn.style.display = 'none';
+    }
+  }
+
+  reportBtn.addEventListener('click', () => {
+    window.open('https://www.kcg.go.kr/kcg/na/ntt/selectNttInfo.do?mi=1229&nttSn=1431907', '_blank');
+  });
+
+  // 현재 위치 불러오기
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(position => {
+      const latlng = [position.coords.latitude, position.coords.longitude];
+      map.setView(latlng, 12);
+      setStartMarker(latlng);
+      info.textContent = "목적지를 지도에서 클릭하거나 검색하세요.";
+    }, () => {
+      map.setView([34.8, 126.4], 9);
+      info.textContent = "현재 위치를 불러오지 못했습니다. 지도에서 출항지를 클릭하거나 검색하세요.";
+    });
+  } else {
+    map.setView([34.8, 126.4], 9);
+    info.textContent = "이 브라우저는 위치 정보를 지원하지 않습니다.";
+  }
+
+  // 목적지 지도 클릭 이벤트
+  map.on('click', e => {
+    setDestMarker(e.latlng);
+    updateDistanceAndUI();
+  });
+
+  // 검색 컨트롤 추가
+  const geocoder = L.Control.geocoder({
+    defaultMarkGeocode: false,
+    placeholder: '목적지 검색',
+  })
+  .on('markgeocode', function(e) {
+    const latlng = e.geocode.center;
+    setDestMarker(latlng);
+    map.setView(latlng, 12);
+    updateDistanceAndUI();
+  })
+  .addTo(map);
+
+</script>
+
+</body>
+</html>
